@@ -1157,23 +1157,23 @@
           password,
           role: "operator",
           registered: true
-        });
-        saveState();
-
-        showToast("Akun dan password berhasil disimpan! Silakan masuk.", "success");
-        document.getElementById("form-register").reset();
-        switchAuthCard("login");
-        setLoginMode("operator");
-        document.getElementById("login-name").value = name;
-        document.getElementById("login-nip").value = nip;
-        document.getElementById("login-password").value = "";
-      } catch (err) {
-        showToast("Gagal menyimpan akun ke server. Data tetap tersimpan di perangkat ini.", "error");
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = originalText || "Simpan Akun & Password";
+    async function syncModulesFromGoogleSheet(showFeedback = false) {
+      try {
+        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getModules&t=${Date.now()}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json && json.status === "ok" && Array.isArray(json.modules) && json.modules.length > 0) {
+          appState.modules = json.modules;
+          saveState();
+          if (currentUser && currentUser.role === "operator") {
+            renderOperatorDashboard();
+          }
+          if (showFeedback) {
+            showToast("Daftar modul & bank soal berhasil disinkronkan dari server.", "success");
+          }
         }
+      } catch (e) {
+        // Gunakan modul lokal jika offline
       }
     }
 
@@ -1195,55 +1195,21 @@
       document.getElementById("op-dash-nip").textContent = currentUser.nip;
       document.getElementById("op-dash-line").textContent = currentUser.line;
       const filterLine = document.getElementById("op-filter-line").value;
-      const isGeneralLine = (line) => String(line || "").trim().toLowerCase() === "general/ umum";
+      const normalizeLine = (line) => String(line || "").trim().toLowerCase();
+      const isGeneralLine = (line) => {
+        const val = normalizeLine(line);
+        return val === "general/ umum" || val === "general" || val === "umum" || val === "semua bagian";
+      };
       const modules = appState.modules.filter((m) => {
         if (filterLine === "ALL") {
-          return isGeneralLine(m.line) || String(m.line || "") === String(currentUser.line || "");
+          return isGeneralLine(m.line) || normalizeLine(m.line) === normalizeLine(currentUser.line);
         }
-        return m.line === filterLine;
+        return normalizeLine(m.line) === normalizeLine(filterLine);
       });
       document.getElementById("op-module-count").textContent = `${modules.length} Modul`;
       const grid = document.getElementById("operator-modules-grid");
-      grid.innerHTML = modules.map((mod) => {
-        const mins = Math.round((mod.secondsPerQuestion || 60) / 60);
-        const lastAttempt = getLatestModuleAttempt(currentUser.nip, mod.title);
-        const permitted = hasRemedialPermission(currentUser.nip, mod.title);
-
-        let actionHtml = `<button onclick="startExam('${mod.id}')" class="w-full py-2.5 px-4 bg-[#0072CE] hover:bg-[#005AA7] text-white font-bold text-xs sm:text-sm rounded-xl transition">Mulai Ujian</button>`;
-        let statusBadge = "";
-
-        if (lastAttempt) {
-          if (lastAttempt.status === "LULUS" && !permitted) {
-            statusBadge = `<span class="inline-block mt-2 px-2.5 py-0.5 text-[11px] font-bold rounded-lg bg-sky-500/20 text-sky-200">SUDAH LULUS</span>`;
-            actionHtml = `<button disabled class="w-full py-2.5 px-4 bg-slate-800 text-gray-400 font-bold text-xs sm:text-sm rounded-xl cursor-not-allowed">Sudah Selesai (Terkunci)</button>`;
-          } else if (lastAttempt.status === "TIDAK LULUS" && !permitted) {
-            statusBadge = `<span class="inline-block mt-2 px-2.5 py-0.5 text-[11px] font-bold rounded-lg bg-red-500/15 text-red-400">TIDAK LULUS • MENUNGGU IZIN REMEDIAL TRAINER</span>`;
-            actionHtml = `<button disabled class="w-full py-2.5 px-4 bg-amber-500/10 border border-amber-500/30 text-amber-300 font-bold text-xs sm:text-sm rounded-xl cursor-not-allowed">Terkunci — Minta Izin Remedial Trainer</button>`;
-          } else if (permitted) {
-            statusBadge = `<span class="inline-block mt-2 px-2.5 py-0.5 text-[11px] font-bold rounded-lg bg-amber-500/20 text-amber-300">IZIN REMEDIAL AKTIF</span>`;
-            actionHtml = `<button onclick="startExam('${mod.id}')" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold text-xs sm:text-sm rounded-xl transition">Mulai Ujian Remedial</button>`;
-          }
-        }
-
-        return `
-          <div class="bg-[#0B192C]/95 border border-sky-400/20 rounded-2xl p-5 flex flex-col justify-between gap-4 shadow-lg">
-            <div>
-              <span class="text-[11px] font-bold uppercase tracking-wider text-sky-300">${mod.line}</span>
-              <h4 class="text-base font-bold text-white mt-1">${mod.title}</h4>
-              <p class="text-xs text-gray-300 mt-2">${mod.questions.length} Soal &bull; Waktu: <b>${mins} Menit / Soal</b></p>
-              ${statusBadge}
-            </div>
-            ${actionHtml}
-          </div>
-        `;
-      }).join("");
-      if (window.lucide) lucide.createIcons();
-    }
-
-    async function startExam(moduleId) {
-      const mod = appState.modules.find((m) => m.id === moduleId);
-      if (!mod || !mod.questions.length) {
-        showToast("Modul ini belum memiliki soal.", "error");
+      if (!modules.length) {
+        grid.innerHTML = `<div class="col-span-full bg-[#0B192C]/95 border border-sky-400/20 rounded-2xl p-6 text-center text-xs sm:text-sm text-gray-300">Belum ada modul untuk bagian <b>${filterLine === "ALL" ? currentUser.line : filterLine}</b> atau <b>General/ Umum</b>.</div>`;
         return;
       }
 
