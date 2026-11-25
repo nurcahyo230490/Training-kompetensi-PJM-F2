@@ -728,31 +728,13 @@
 
     async function syncModulesToGoogleSheet() {
       try {
-        const params = new URLSearchParams({
-          action: "saveModules",
-          modules: JSON.stringify(appState.modules || [])
-        });
-        const res = await fetch(`${GOOGLE_SCRIPT_URL}?${params.toString()}`, {
-          method: "GET"
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.status === "ok") {
-            return true;
-          }
-        }
-      } catch (e) {
-        // Fallback ke POST jika GET gagal atau payload panjang
-      }
-
-      try {
         await fetch(GOOGLE_SCRIPT_URL, {
           method: "POST",
           mode: "no-cors",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "saveModules",
-            modules: appState.modules
+            modules: appState.modules || []
           })
         });
         return true;
@@ -1476,28 +1458,6 @@
       if (window.lucide) lucide.createIcons();
     }
 
-    async function handleAddManualQuestion(e) {
-      e.preventDefault();
-      const mod = appState.modules.find((m) => m.id === document.getElementById("q-module-select").value);
-      if (!mod) return;
-      const question = document.getElementById("q-text").value.trim();
-      const options = [
-        document.getElementById("q-opt-a").value.trim(),
-        document.getElementById("q-opt-b").value.trim(),
-        document.getElementById("q-opt-c").value.trim(),
-        document.getElementById("q-opt-d").value.trim()
-      ];
-      const correctIndex = Number(document.getElementById("q-correct").value) || 0;
-      mod.questions.push({ id: "Q-" + Date.now(), question, options, correctIndex });
-      saveState();
-      document.getElementById("form-add-question").reset();
-      populateModuleSelect();
-      document.getElementById("q-module-select").value = mod.id;
-      renderAdminQuestionList();
-      renderAdminModuleList();
-      await syncModulesToGoogleSheet();
-      showToast(`Soal ditambahkan & disinkronkan (total ${mod.questions.length} soal).`, "success");
-    }
     async function applyImportedQuestionsToModule(newQuestions, sourceLabel) {
       if (!newQuestions || !newQuestions.length) {
         showToast(`Tidak ada soal valid ditemukan dari ${sourceLabel}. Periksa format soal.`, "error");
@@ -1521,50 +1481,6 @@
       renderAdminModuleList();
       await syncModulesToGoogleSheet();
       showToast(`Berhasil mengimpor ${newQuestions.length} soal dari ${sourceLabel} & menyinkronkan ke server pusat.`, "success");
-    }
-    async function deleteQuestion(modId, qId) {
-      const mod = appState.modules.find((m) => m.id === modId);
-      if (!mod) return;
-      mod.questions = mod.questions.filter((q) => q.id !== qId);
-      saveState();
-      populateModuleSelect();
-      document.getElementById("q-module-select").value = mod.id;
-      renderAdminQuestionList();
-      renderAdminModuleList();
-      await syncModulesToGoogleSheet();
-    }
-
-    async function editQuestion(modId, qId) {
-      const mod = appState.modules.find((m) => m.id === modId);
-      if (!mod) return;
-      const q = mod.questions.find((item) => item.id === qId);
-      if (!q) return;
-
-      const nextQuestion = window.prompt("Edit pertanyaan:", q.question);
-      if (nextQuestion === null || !nextQuestion.trim()) return;
-
-      const optA = window.prompt("Edit Pilihan A:", q.options[0] ?? "");
-      if (optA === null) return;
-      const optB = window.prompt("Edit Pilihan B:", q.options[1] ?? "");
-      if (optB === null) return;
-      const optC = window.prompt("Edit Pilihan C:", q.options[2] ?? "");
-      if (optC === null) return;
-      const optD = window.prompt("Edit Pilihan D:", q.options[3] ?? "");
-      if (optD === null) return;
-
-      const letters = ["A", "B", "C", "D"];
-      const currentKeyLetter = letters[q.correctIndex] || "A";
-      const keyInput = window.prompt("Edit Kunci Jawaban (A, B, C, atau D):", currentKeyLetter);
-      if (keyInput === null) return;
-
-      q.question = nextQuestion.trim();
-      q.options = [optA.trim(), optB.trim(), optC.trim(), optD.trim()];
-      q.correctIndex = letterToOptionIndex(keyInput);
-
-      saveState();
-      renderAdminQuestionList();
-      await syncModulesToGoogleSheet();
-      showToast("Soal diperbarui & disinkronkan ke server pusat.", "success");
     }
 
     async function grantRemedialPermission(nip, name, line, moduleTitle) {
@@ -1980,31 +1896,6 @@
       return parsed;
     }
 
-    function applyImportedQuestionsToModule(newQuestions, sourceLabel) {
-      if (!newQuestions || !newQuestions.length) {
-        showToast(`Tidak ada soal valid ditemukan dari ${sourceLabel}. Periksa format soal.`, "error");
-        return;
-      }
-      const mod = appState.modules.find((m) => m.id === document.getElementById("q-module-select").value);
-      if (!mod) {
-        showToast("Pilih atau buat modul tujuan terlebih dahulu.", "error");
-        return;
-      }
-      const replaceMode = document.getElementById("import-replace-mode")?.checked;
-      if (replaceMode) {
-        mod.questions = newQuestions;
-      } else {
-        mod.questions.push(...newQuestions);
-      }
-      saveState();
-      syncModulesToGoogleSheet();
-      populateModuleSelect();
-      document.getElementById("q-module-select").value = mod.id;
-      renderAdminQuestionList();
-      renderAdminModuleList();
-      showToast(`Berhasil mengimpor ${newQuestions.length} soal dari ${sourceLabel} (Total modul: ${mod.questions.length} soal, otomatis skala 100).`, "success");
-    }
-
     async function handleImportWordFile(event) {
       const file = event.target.files && event.target.files[0];
       if (!file) return;
@@ -2021,7 +1912,7 @@
           return;
         }
         const questions = parseQuestionsFromPlainText(extractedText);
-        applyImportedQuestionsToModule(questions, `Word (${file.name})`);
+        await applyImportedQuestionsToModule(questions, `Word (${file.name})`);
       } catch (err) {
         showToast("Gagal membaca file Word (.docx). Pastikan file tidak rusak atau terproteksi password.", "error");
       } finally {
@@ -2042,7 +1933,7 @@
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
         const questions = parseQuestionsFromTabularRows(rows);
-        applyImportedQuestionsToModule(questions, `Excel (${file.name})`);
+        await applyImportedQuestionsToModule(questions, `Excel (${file.name})`);
       } catch (err) {
         showToast("Gagal membaca file Excel / CSV. Pastikan format kolom sesuai template.", "error");
       } finally {
@@ -2104,7 +1995,7 @@
           if (!res.ok) throw new Error("Akses ditolak");
           const txt = await res.text();
           const questions = parseQuestionsFromPlainText(txt);
-          applyImportedQuestionsToModule(questions, "Google Docs");
+          await applyImportedQuestionsToModule(questions, "Google Docs");
         } else if (sheetMatch) {
           const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetMatch[1]}/export?format=csv`;
           const res = await fetch(exportUrl);
@@ -2114,23 +2005,23 @@
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
           const questions = parseQuestionsFromTabularRows(rows);
-          applyImportedQuestionsToModule(questions, "Google Sheets");
+          await applyImportedQuestionsToModule(questions, "Google Sheets");
         }
       } catch (err) {
         showToast("Gagal menarik langsung dari link (pastikan akses link diatur ke 'Anyone with the link - Viewer') atau gunakan tombol 'Paste Teks'.", "error");
       }
     }
 
-    function deleteQuestion(modId, qId) {
+    async function deleteQuestion(modId, qId) {
       const mod = appState.modules.find((m) => m.id === modId);
       if (!mod) return;
       mod.questions = mod.questions.filter((q) => q.id !== qId);
       saveState();
-      syncModulesToGoogleSheet();
       populateModuleSelect();
       document.getElementById("q-module-select").value = mod.id;
       renderAdminQuestionList();
       renderAdminModuleList();
+      await syncModulesToGoogleSheet();
     }
 
     async function editQuestion(modId, qId) {
