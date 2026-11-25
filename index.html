@@ -746,6 +746,39 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
     }
 
+    async function syncModulesToGoogleSheet() {
+      try {
+        await fetch(GOOGLE_SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "saveModules",
+            modules: appState.modules
+          })
+        });
+      } catch (e) {
+        // Tetap tersimpan lokal jika offline
+      }
+    }
+
+    async function syncModulesFromGoogleSheet(showFeedback = false) {
+      try {
+        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getModules`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json && json.status === "ok" && Array.isArray(json.modules) && json.modules.length > 0) {
+          appState.modules = json.modules;
+          saveState();
+          if (showFeedback) {
+            showToast("Daftar modul & bank soal berhasil disinkronkan dari server.", "success");
+          }
+        }
+      } catch (e) {
+        // Gunakan modul lokal jika offline
+      }
+    }
+
     function getRemedialKey(nip, moduleTitle) {
       return `${String(nip || "").trim().toLowerCase()}|${String(moduleTitle || "").trim().toLowerCase()}`;
     }
@@ -986,6 +1019,7 @@
         showView("view-admin-dashboard");
         switchAdminTab("recap");
         syncRecapFromGoogleSheet(false);
+        syncModulesFromGoogleSheet(false);
         return;
       }
 
@@ -1047,7 +1081,10 @@
       document.getElementById("header-user-name").textContent = currentUser.name;
       document.getElementById("header-user-role").textContent = `${currentUser.line} • Operator`;
       showView("view-operator-dashboard");
-      await syncRemedialPermissionsFromSheet();
+      await Promise.all([
+        syncModulesFromGoogleSheet(false),
+        syncRemedialPermissionsFromSheet()
+      ]);
       renderOperatorDashboard();
     }
 
@@ -1396,9 +1433,11 @@
       if (tabName === "recap") {
         syncRemedialPermissionsFromSheet().then(() => renderAdminRecap());
       } else {
-        populateModuleSelect();
-        renderAdminQuestionList();
-        renderAdminModuleList();
+        syncModulesFromGoogleSheet(false).then(() => {
+          populateModuleSelect();
+          renderAdminQuestionList();
+          renderAdminModuleList();
+        });
       }
       if (window.lucide) lucide.createIcons();
     }
@@ -1595,6 +1634,7 @@
       const newMod = { id: "MOD-" + Date.now(), title, line, secondsPerQuestion, kkm, questions: [] };
       appState.modules.push(newMod);
       saveState();
+      syncModulesToGoogleSheet();
       document.getElementById("form-create-module").reset();
       document.getElementById("mod-kkm").value = FIXED_KKM_SCALE_100;
       populateModuleSelect();
@@ -1648,6 +1688,7 @@
       }
 
       saveState();
+      syncModulesToGoogleSheet();
       cancelEditModule();
       populateModuleSelect();
       document.getElementById("q-module-select").value = mod.id;
@@ -1676,6 +1717,7 @@
       }
 
       saveState();
+      syncModulesToGoogleSheet();
       if (document.getElementById("edit-mod-id").value === modId) {
         cancelEditModule();
       }
@@ -1730,6 +1772,7 @@
       const correctIndex = Number(document.getElementById("q-correct").value) || 0;
       mod.questions.push({ id: "Q-" + Date.now(), question, options, correctIndex });
       saveState();
+      syncModulesToGoogleSheet();
       document.getElementById("form-add-question").reset();
       populateModuleSelect();
       document.getElementById("q-module-select").value = mod.id;
@@ -1852,6 +1895,7 @@
         mod.questions.push(...newQuestions);
       }
       saveState();
+      syncModulesToGoogleSheet();
       populateModuleSelect();
       document.getElementById("q-module-select").value = mod.id;
       renderAdminQuestionList();
@@ -1980,6 +2024,7 @@
       if (!mod) return;
       mod.questions = mod.questions.filter((q) => q.id !== qId);
       saveState();
+      syncModulesToGoogleSheet();
       populateModuleSelect();
       document.getElementById("q-module-select").value = mod.id;
       renderAdminQuestionList();
@@ -2014,6 +2059,7 @@
       q.correctIndex = letterToOptionIndex(keyInput);
 
       saveState();
+      syncModulesToGoogleSheet();
       renderAdminQuestionList();
       showToast("Soal berhasil diperbarui.", "success");
     }
@@ -2049,6 +2095,7 @@
       if (window.lucide) lucide.createIcons();
       setLoginMode("operator");
       showView("view-auth");
+      syncModulesFromGoogleSheet(false);
     });
   </script>
 </body>
